@@ -412,26 +412,38 @@ const THEMES = {
 let currentSlide = 0;
 let currentTheme = 'midnight';
 
-// If DECK was baked in, render immediately
-if (DECK) {
+function initDeck(data) {
+  if (!data) return;
+  // data can be a JSON string (from toolOutput) or an object (baked in)
+  DECK = typeof data === 'string' ? JSON.parse(data) : data;
+  currentSlide = 0;
   currentTheme = DECK.theme || 'midnight';
   applyTheme(currentTheme);
   render();
 }
 
-// Also listen for postMessage so ChatGPT iframe bridge can push data
+// Priority 1: DECK baked in by server (direct /deck access)
+if (DECK) {
+  initDeck(DECK);
+}
+
+// Priority 2: ChatGPT injects props via window.openai.toolOutput
+if (!DECK && window.openai && window.openai.toolOutput) {
+  initDeck(window.openai.toolOutput);
+}
+
+// Priority 3: ChatGPT sends props via postMessage
 window.addEventListener("message", (event) => {
-  if (event.source !== window.parent) return;
   const msg = event.data;
-  if (!msg || msg.jsonrpc !== "2.0") return;
-  if (msg.method !== "ui/notifications/tool-result") return;
-  const newDeck = msg.params?._meta?.deck;
-  if (newDeck) {
-    DECK = newDeck;
-    currentSlide = 0;
-    currentTheme = DECK.theme || 'midnight';
-    applyTheme(currentTheme);
-    render();
+  // ChatGPT openai bridge
+  if (msg && msg.type === 'openai.toolOutput') {
+    initDeck(msg.data);
+    return;
+  }
+  // MCP postMessage bridge (legacy)
+  if (msg && msg.jsonrpc === "2.0" && msg.method === "ui/notifications/tool-result") {
+    const d = msg.params?._meta?.deck;
+    if (d) initDeck(d);
   }
 });
 

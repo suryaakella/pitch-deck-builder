@@ -1,8 +1,9 @@
+import json
 import os
 import uuid
 from typing import Annotated, Optional
 from pydantic import Field
-from mcp.types import ToolAnnotations
+from mcp.types import ToolAnnotations, TextContent, EmbeddedResource, TextResourceContents
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import HTMLResponse
@@ -11,8 +12,9 @@ from widget import build_widget_html
 
 server = FastMCP("pitch-deck-builder")
 
-# Base URL for generating clickable links (set by Manufact or default to localhost)
+# Base URL — Manufact sets PUBLIC_URL; falls back to localhost for dev
 BASE_URL = os.environ.get("PUBLIC_URL", "http://localhost:3000")
+WIDGET_URL = f"{BASE_URL}/widgets/pitch-deck.html"
 
 # ─── In-memory state ──────────────────────────────────────────
 
@@ -60,15 +62,46 @@ def deck_to_text(deck: dict) -> str:
     return f"{header}\n{slides_text}"
 
 
-def tool_result(deck: dict, summary: str) -> str:
-    link = f"{BASE_URL}/deck"
-    return f"{summary}\n\nView presentation: {link}\n\n{deck_to_text(deck)}"
+def tool_result(deck: dict, summary: str) -> list[TextContent | EmbeddedResource]:
+    """Return text fallback + embedded widget resource for ChatGPT inline rendering."""
+    # Props that the widget reads via window.openai.toolOutput
+    props = json.dumps({
+        "companyName": deck["companyName"],
+        "tagline": deck.get("tagline", ""),
+        "theme": deck["theme"],
+        "slides": deck["slides"],
+    })
+
+    return [
+        # Text fallback — always visible in chat
+        TextContent(
+            type="text",
+            text=f"{summary}\n\nView presentation: {BASE_URL}/deck\n\n{deck_to_text(deck)}",
+        ),
+        # Embedded resource — ChatGPT fetches the widget URI, injects props
+        EmbeddedResource(
+            type="resource",
+            resource=TextResourceContents(
+                uri=WIDGET_URL,
+                mimeType="text/html",
+                text=props,
+            ),
+        ),
+    ]
 
 
-# ─── HTML route: serves the interactive widget ────────────────
+# ─── HTML routes ──────────────────────────────────────────────
+
+@server.custom_route("/widgets/pitch-deck.html", methods=["GET"])
+async def widget_page(request: Request) -> HTMLResponse:
+    """Widget page loaded by ChatGPT in its iframe.
+    Reads data from window.openai.toolOutput (injected by ChatGPT)."""
+    return HTMLResponse(build_widget_html())
+
 
 @server.custom_route("/deck", methods=["GET"])
 async def view_deck(request: Request) -> HTMLResponse:
+    """Direct browser access — deck data baked into HTML."""
     deck = get_current_deck()
     if not deck:
         return HTMLResponse("<h1>No deck generated yet. Ask ChatGPT to create one first.</h1>", status_code=404)
@@ -101,7 +134,7 @@ def generate_pitch_deck(
     stage: Annotated[Optional[str], Field(description="Funding stage (e.g. pre-seed, seed, Series A)", default=None)],
     ask_amount: Annotated[Optional[str], Field(description="How much they're raising (e.g. $2M)", default=None)],
     traction: Annotated[Optional[str], Field(description="Key traction metrics (e.g. 50K users, $1M ARR)", default=None)],
-) -> str:
+) -> list[TextContent | EmbeddedResource]:
     global current_deck_id
 
     deck_id = str(uuid.uuid4())[:8]
@@ -182,7 +215,7 @@ def update_slide(
     title: Annotated[Optional[str], Field(description="New title for the slide", default=None)],
     content: Annotated[Optional[str], Field(description="New body content", default=None)],
     bullets: Annotated[Optional[list[str]], Field(description="New bullet points", default=None)],
-) -> str:
+) -> list[TextContent | EmbeddedResource]:
     deck = get_current_deck()
     if not deck:
         raise ValueError("No deck found. Generate a pitch deck first.")
@@ -213,7 +246,7 @@ def add_slide(
     slide_type: Annotated[str, Field(description="Slide type: problem, solution, market, product, business_model, traction, team, ask, custom", default="custom")],
     position: Annotated[Optional[int], Field(description="0-based position to insert at. Appends to end if omitted.", default=None)],
     bullets: Annotated[Optional[list[str]], Field(description="Optional bullet points", default=None)],
-) -> str:
+) -> list[TextContent | EmbeddedResource]:
     deck = get_current_deck()
     if not deck:
         raise ValueError("No deck found. Generate a pitch deck first.")
@@ -239,7 +272,7 @@ def add_slide(
 )
 def remove_slide(
     slide_index: Annotated[int, Field(description="0-based index of the slide to remove")],
-) -> str:
+) -> list[TextContent | EmbeddedResource]:
     deck = get_current_deck()
     if not deck:
         raise ValueError("No deck found. Generate a pitch deck first.")
@@ -260,7 +293,7 @@ def remove_slide(
 )
 def change_theme(
     theme: Annotated[str, Field(description="Theme name: midnight, clean, sunset, forest, electric")],
-) -> str:
+) -> list[TextContent | EmbeddedResource]:
     deck = get_current_deck()
     if not deck:
         raise ValueError("No deck found. Generate a pitch deck first.")

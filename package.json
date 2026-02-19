@@ -1,0 +1,22 @@
+{
+  "name": "pitch-deck-builder",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "dev": "mcp-use dev",
+    "build": "mcp-use build",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "mcp-use": "latest",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.0.0",
+    "typescript": "^5.0.0"
+  }
+}

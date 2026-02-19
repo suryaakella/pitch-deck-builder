@@ -1,6 +1,4 @@
-__pycache__/
-*.pyc
+node_modules/
+dist/
+.mcp-use/
 .env
-preview.html
-venv/
-.venv/

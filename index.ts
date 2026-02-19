@@ -5,6 +5,7 @@ import { randomUUID } from "crypto";
 const server = new MCPServer({
   name: "pitch-deck-builder",
   version: "1.0.0",
+  baseUrl: "https://quiet-mud-usn75.run.mcp-use.com",
 });
 
 // ─── Types ──────────────────────────────────────────────────

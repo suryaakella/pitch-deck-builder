@@ -1,11 +1,8 @@
-import json
 import uuid
 from typing import Annotated, Optional
 from pydantic import Field
 from mcp.types import ToolAnnotations
 from mcp_use.server import MCPServer
-
-from widget import build_widget_html
 
 server = MCPServer(name="pitch-deck-builder", version="1.0.0")
 
@@ -59,22 +56,9 @@ def deck_to_text(deck: dict) -> str:
     return f"{header}\n{slides_text}"
 
 
-def tool_result(deck: dict, summary: str) -> list:
-    """Return tool content: text fallback + inline embedded HTML resource."""
-    html = build_widget_html(deck)
-    return [
-        # 1. Text fallback — always readable in any client
-        {"type": "text", "text": f"{summary}\n\n{deck_to_text(deck)}"},
-        # 2. Embedded resource — HTML inline, no resources/read needed
-        {
-            "type": "resource",
-            "resource": {
-                "uri": f"ui://pitch-deck/{deck['id']}",
-                "mimeType": "text/html",
-                "text": html,
-            },
-        },
-    ]
+def tool_result(deck: dict, summary: str) -> str:
+    """Return a plain string — the only type mcp_use reliably passes through."""
+    return f"{summary}\n\n{deck_to_text(deck)}"
 
 
 # ─── Tool 1: Generate Deck ────────────────────────────────────
@@ -94,7 +78,7 @@ def generate_pitch_deck(
     stage: Annotated[Optional[str], Field(description="Funding stage (e.g. pre-seed, seed, Series A)", default=None)],
     ask_amount: Annotated[Optional[str], Field(description="How much they're raising (e.g. $2M)", default=None)],
     traction: Annotated[Optional[str], Field(description="Key traction metrics (e.g. 50K users, $1M ARR)", default=None)],
-) -> list:
+) -> str:
     """Generate a complete pitch deck with interactive slide viewer."""
     global current_deck_id
 
@@ -176,7 +160,7 @@ def update_slide(
     title: Annotated[Optional[str], Field(description="New title for the slide", default=None)],
     content: Annotated[Optional[str], Field(description="New body content", default=None)],
     bullets: Annotated[Optional[list[str]], Field(description="New bullet points", default=None)],
-) -> list:
+) -> str:
     """Update a specific slide and return the updated deck widget."""
     deck = get_current_deck()
     if not deck:
@@ -208,7 +192,7 @@ def add_slide(
     slide_type: Annotated[str, Field(description="Slide type: problem, solution, market, product, business_model, traction, team, ask, custom", default="custom")],
     position: Annotated[Optional[int], Field(description="0-based position to insert at. Appends to end if omitted.", default=None)],
     bullets: Annotated[Optional[list[str]], Field(description="Optional bullet points", default=None)],
-) -> list:
+) -> str:
     """Add a new slide and return updated deck widget."""
     deck = get_current_deck()
     if not deck:
@@ -235,7 +219,7 @@ def add_slide(
 )
 def remove_slide(
     slide_index: Annotated[int, Field(description="0-based index of the slide to remove")],
-) -> list:
+) -> str:
     """Remove a slide and return updated deck widget."""
     deck = get_current_deck()
     if not deck:
@@ -257,7 +241,7 @@ def remove_slide(
 )
 def change_theme(
     theme: Annotated[str, Field(description="Theme name: midnight, clean, sunset, forest, electric")],
-) -> list:
+) -> str:
     """Change deck theme and return updated widget."""
     deck = get_current_deck()
     if not deck:

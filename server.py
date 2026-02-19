@@ -239,4 +239,4 @@ def change_theme(
 # ─── Run Server ───────────────────────────────────────────────
 
 if __name__ == "__main__":
-    server.run(transport="streamable-http", host="0.0.0.0", port=8000, debug=True)
+    server.run(transport="streamable-http", host="0.0.0.0", port=3000, debug=True)

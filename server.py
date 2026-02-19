@@ -1,10 +1,18 @@
+import os
 import uuid
 from typing import Annotated, Optional
 from pydantic import Field
 from mcp.types import ToolAnnotations
-from mcp_use.server import MCPServer
+from mcp.server.fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import HTMLResponse
 
-server = MCPServer(name="pitch-deck-builder", version="1.0.0")
+from widget import build_widget_html
+
+server = FastMCP("pitch-deck-builder")
+
+# Base URL for generating clickable links (set by Manufact or default to localhost)
+BASE_URL = os.environ.get("PUBLIC_URL", "http://localhost:3000")
 
 # ─── In-memory state ──────────────────────────────────────────
 
@@ -28,10 +36,8 @@ def make_slide(slide_type: str, title: str, **kwargs) -> dict:
 
 
 def format_slide_text(index: int, slide: dict) -> str:
-    """Format a single slide as readable text."""
     icon = slide.get("icon", "")
     lines = [f"### Slide {index + 1}: {icon} {slide['title']}"]
-
     if slide.get("subtitle"):
         lines.append(slide["subtitle"])
     if slide.get("content"):
@@ -43,12 +49,10 @@ def format_slide_text(index: int, slide: dict) -> str:
         for m in slide["metrics"]:
             desc = f" ({m['description']})" if m.get("description") else ""
             lines.append(f"  - **{m['label']}**: {m['value']}{desc}")
-
     return "\n".join(lines)
 
 
 def deck_to_text(deck: dict) -> str:
-    """Convert a full deck to a readable markdown summary."""
     header = f"## {deck['companyName']} — Pitch Deck\n*{deck.get('tagline', '')}*\n*Theme: {deck['theme']} | {len(deck['slides'])} slides*\n"
     slides_text = "\n\n".join(
         format_slide_text(i, s) for i, s in enumerate(deck["slides"])
@@ -57,8 +61,27 @@ def deck_to_text(deck: dict) -> str:
 
 
 def tool_result(deck: dict, summary: str) -> str:
-    """Return a plain string — the only type mcp_use reliably passes through."""
-    return f"{summary}\n\n{deck_to_text(deck)}"
+    link = f"{BASE_URL}/deck"
+    return f"{summary}\n\nView presentation: {link}\n\n{deck_to_text(deck)}"
+
+
+# ─── HTML route: serves the interactive widget ────────────────
+
+@server.custom_route("/deck", methods=["GET"])
+async def view_deck(request: Request) -> HTMLResponse:
+    deck = get_current_deck()
+    if not deck:
+        return HTMLResponse("<h1>No deck generated yet. Ask ChatGPT to create one first.</h1>", status_code=404)
+    return HTMLResponse(build_widget_html(deck))
+
+
+@server.custom_route("/deck/{deck_id}", methods=["GET"])
+async def view_deck_by_id(request: Request) -> HTMLResponse:
+    deck_id = request.path_params["deck_id"]
+    deck = decks.get(deck_id)
+    if not deck:
+        return HTMLResponse("<h1>Deck not found.</h1>", status_code=404)
+    return HTMLResponse(build_widget_html(deck))
 
 
 # ─── Tool 1: Generate Deck ────────────────────────────────────
@@ -67,7 +90,7 @@ def tool_result(deck: dict, summary: str) -> str:
     name="generate_pitch_deck",
     title="Generate Pitch Deck",
     description="""Generate a complete pitch deck from a startup description.
-    Returns an interactive slide viewer widget with 8-10 professionally designed slides.
+    Returns an interactive slide viewer with 8-10 professionally designed slides.
     Use this when the user wants to create a pitch deck, investor presentation, or startup slides.""",
     annotations=ToolAnnotations(readOnlyHint=False, idempotentHint=False),
 )
@@ -79,7 +102,6 @@ def generate_pitch_deck(
     ask_amount: Annotated[Optional[str], Field(description="How much they're raising (e.g. $2M)", default=None)],
     traction: Annotated[Optional[str], Field(description="Key traction metrics (e.g. 50K users, $1M ARR)", default=None)],
 ) -> str:
-    """Generate a complete pitch deck with interactive slide viewer."""
     global current_deck_id
 
     deck_id = str(uuid.uuid4())[:8]
@@ -161,7 +183,6 @@ def update_slide(
     content: Annotated[Optional[str], Field(description="New body content", default=None)],
     bullets: Annotated[Optional[list[str]], Field(description="New bullet points", default=None)],
 ) -> str:
-    """Update a specific slide and return the updated deck widget."""
     deck = get_current_deck()
     if not deck:
         raise ValueError("No deck found. Generate a pitch deck first.")
@@ -193,7 +214,6 @@ def add_slide(
     position: Annotated[Optional[int], Field(description="0-based position to insert at. Appends to end if omitted.", default=None)],
     bullets: Annotated[Optional[list[str]], Field(description="Optional bullet points", default=None)],
 ) -> str:
-    """Add a new slide and return updated deck widget."""
     deck = get_current_deck()
     if not deck:
         raise ValueError("No deck found. Generate a pitch deck first.")
@@ -220,7 +240,6 @@ def add_slide(
 def remove_slide(
     slide_index: Annotated[int, Field(description="0-based index of the slide to remove")],
 ) -> str:
-    """Remove a slide and return updated deck widget."""
     deck = get_current_deck()
     if not deck:
         raise ValueError("No deck found. Generate a pitch deck first.")
@@ -242,7 +261,6 @@ def remove_slide(
 def change_theme(
     theme: Annotated[str, Field(description="Theme name: midnight, clean, sunset, forest, electric")],
 ) -> str:
-    """Change deck theme and return updated widget."""
     deck = get_current_deck()
     if not deck:
         raise ValueError("No deck found. Generate a pitch deck first.")
@@ -255,4 +273,4 @@ def change_theme(
 # ─── Run Server ───────────────────────────────────────────────
 
 if __name__ == "__main__":
-    server.run(transport="streamable-http", host="0.0.0.0", port=3000, debug=True)
+    server.run(transport="streamable-http", host="0.0.0.0", port=3000)

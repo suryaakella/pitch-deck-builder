@@ -1,11 +1,9 @@
 import json
 import uuid
 from typing import Annotated, Optional
-from pydantic import BaseModel, Field
+from pydantic import Field
 from mcp.types import ToolAnnotations
 from mcp_use.server import MCPServer
-from mcp_ui_server import create_ui_resource
-from mcp_ui_server.core import UIResource
 
 from widget import build_widget_html
 
@@ -32,18 +30,51 @@ def make_slide(slide_type: str, title: str, **kwargs) -> dict:
     }
 
 
-def deck_to_ui(deck: dict) -> list[UIResource]:
-    """Return the deck as an interactive HTML widget via mcp-ui-server."""
+def format_slide_text(index: int, slide: dict) -> str:
+    """Format a single slide as readable text."""
+    icon = slide.get("icon", "")
+    lines = [f"### Slide {index + 1}: {icon} {slide['title']}"]
+
+    if slide.get("subtitle"):
+        lines.append(slide["subtitle"])
+    if slide.get("content"):
+        lines.append(slide["content"])
+    if slide.get("bullets"):
+        for b in slide["bullets"]:
+            lines.append(f"  - {b}")
+    if slide.get("metrics"):
+        for m in slide["metrics"]:
+            desc = f" ({m['description']})" if m.get("description") else ""
+            lines.append(f"  - **{m['label']}**: {m['value']}{desc}")
+
+    return "\n".join(lines)
+
+
+def deck_to_text(deck: dict) -> str:
+    """Convert a full deck to a readable markdown summary."""
+    header = f"## {deck['companyName']} — Pitch Deck\n*{deck.get('tagline', '')}*\n*Theme: {deck['theme']} | {len(deck['slides'])} slides*\n"
+    slides_text = "\n\n".join(
+        format_slide_text(i, s) for i, s in enumerate(deck["slides"])
+    )
+    return f"{header}\n{slides_text}"
+
+
+def tool_result(deck: dict, summary: str) -> list:
+    """Return tool content: text fallback + inline embedded HTML resource."""
     html = build_widget_html(deck)
-    ui_resource = create_ui_resource({
-        "uri": f"ui://pitch-deck/{deck['id']}",
-        "content": {
-            "type": "rawHtml",
-            "htmlString": html,
+    return [
+        # 1. Text fallback — always readable in any client
+        {"type": "text", "text": f"{summary}\n\n{deck_to_text(deck)}"},
+        # 2. Embedded resource — HTML inline, no resources/read needed
+        {
+            "type": "resource",
+            "resource": {
+                "uri": f"ui://pitch-deck/{deck['id']}",
+                "mimeType": "text/html",
+                "text": html,
+            },
         },
-        "encoding": "text",
-    })
-    return [ui_resource]
+    ]
 
 
 # ─── Tool 1: Generate Deck ────────────────────────────────────
@@ -63,7 +94,7 @@ def generate_pitch_deck(
     stage: Annotated[Optional[str], Field(description="Funding stage (e.g. pre-seed, seed, Series A)", default=None)],
     ask_amount: Annotated[Optional[str], Field(description="How much they're raising (e.g. $2M)", default=None)],
     traction: Annotated[Optional[str], Field(description="Key traction metrics (e.g. 50K users, $1M ARR)", default=None)],
-) -> list[UIResource]:
+) -> list:
     """Generate a complete pitch deck with interactive slide viewer."""
     global current_deck_id
 
@@ -130,7 +161,7 @@ def generate_pitch_deck(
     decks[deck_id] = deck
     current_deck_id = deck_id
 
-    return deck_to_ui(deck)
+    return tool_result(deck, f"Created pitch deck for {company_name} with {len(slides)} slides.")
 
 
 # ─── Tool 2: Update Slide ─────────────────────────────────────
@@ -145,7 +176,7 @@ def update_slide(
     title: Annotated[Optional[str], Field(description="New title for the slide", default=None)],
     content: Annotated[Optional[str], Field(description="New body content", default=None)],
     bullets: Annotated[Optional[list[str]], Field(description="New bullet points", default=None)],
-) -> list[UIResource]:
+) -> list:
     """Update a specific slide and return the updated deck widget."""
     deck = get_current_deck()
     if not deck:
@@ -161,7 +192,7 @@ def update_slide(
     if bullets:
         slide["bullets"] = bullets
 
-    return deck_to_ui(deck)
+    return tool_result(deck, f"Updated slide {slide_index} in {deck['companyName']} deck.")
 
 
 # ─── Tool 3: Add Slide ────────────────────────────────────────
@@ -177,7 +208,7 @@ def add_slide(
     slide_type: Annotated[str, Field(description="Slide type: problem, solution, market, product, business_model, traction, team, ask, custom", default="custom")],
     position: Annotated[Optional[int], Field(description="0-based position to insert at. Appends to end if omitted.", default=None)],
     bullets: Annotated[Optional[list[str]], Field(description="Optional bullet points", default=None)],
-) -> list[UIResource]:
+) -> list:
     """Add a new slide and return updated deck widget."""
     deck = get_current_deck()
     if not deck:
@@ -192,7 +223,7 @@ def add_slide(
     else:
         deck["slides"].append(new_slide)
 
-    return deck_to_ui(deck)
+    return tool_result(deck, f"Added slide '{title}' to {deck['companyName']} deck.")
 
 
 # ─── Tool 4: Remove Slide ─────────────────────────────────────
@@ -204,7 +235,7 @@ def add_slide(
 )
 def remove_slide(
     slide_index: Annotated[int, Field(description="0-based index of the slide to remove")],
-) -> list[UIResource]:
+) -> list:
     """Remove a slide and return updated deck widget."""
     deck = get_current_deck()
     if not deck:
@@ -212,8 +243,9 @@ def remove_slide(
     if slide_index < 0 or slide_index >= len(deck["slides"]):
         raise ValueError(f"Invalid slide index.")
 
+    removed_title = deck["slides"][slide_index]["title"]
     deck["slides"].pop(slide_index)
-    return deck_to_ui(deck)
+    return tool_result(deck, f"Removed slide '{removed_title}' from {deck['companyName']} deck.")
 
 
 # ─── Tool 5: Change Theme ─────────────────────────────────────
@@ -225,7 +257,7 @@ def remove_slide(
 )
 def change_theme(
     theme: Annotated[str, Field(description="Theme name: midnight, clean, sunset, forest, electric")],
-) -> list[UIResource]:
+) -> list:
     """Change deck theme and return updated widget."""
     deck = get_current_deck()
     if not deck:
@@ -233,7 +265,7 @@ def change_theme(
     if theme not in ("midnight", "clean", "sunset", "forest", "electric"):
         raise ValueError("Invalid theme. Choose: midnight, clean, sunset, forest, electric")
     deck["theme"] = theme
-    return deck_to_ui(deck)
+    return tool_result(deck, f"Changed {deck['companyName']} deck theme to {theme}.")
 
 
 # ─── Run Server ───────────────────────────────────────────────

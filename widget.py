@@ -1,18 +1,46 @@
 import json
 
 
-def build_widget_html(deck: dict) -> str:
-    """Build a complete self-contained HTML string for the pitch deck viewer widget."""
-    deck_json = json.dumps(deck)
+def build_widget_html(deck: dict | None = None) -> str:
+    """Build a complete self-contained HTML string for the pitch deck viewer widget.
 
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800;900&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-  :root {{
+    If a deck dict is provided, bakes it into the HTML so the widget works standalone
+    (direct browser open, resource fetch, etc.).
+    Also always listens for postMessage so ChatGPT's iframe bridge can push updated data.
+    """
+
+    if deck is not None:
+        deck_init = f"let DECK = {json.dumps(deck)};"
+    else:
+        deck_init = "let DECK = null;"
+
+    # Use string concatenation to avoid f-string escaping hell with CSS/JS braces
+    return (
+        '<!DOCTYPE html>\n'
+        '<html lang="en">\n'
+        '<head>\n'
+        '<meta charset="UTF-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
+        '<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800;900&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">\n'
+        '<style>\n'
+        + _CSS
+        + '\n</style>\n'
+        '</head>\n'
+        '<body>\n'
+        '<div id="app"><div class="loading">Loading pitch deck...</div></div>\n'
+        '<script>\n'
+        + deck_init + '\n'
+        + _JS
+        + '\n</script>\n'
+        '</body>\n'
+        '</html>'
+    )
+
+
+# ─── Static CSS (no interpolation needed) ─────────────────────
+
+_CSS = """
+  :root {
     --bg: #0f172a;
     --bg-secondary: rgba(255,255,255,0.05);
     --text: #ffffff;
@@ -26,11 +54,11 @@ def build_widget_html(deck: dict) -> str:
     --dot-inactive: rgba(255,255,255,0.25);
     --shadow: 0 4px 24px rgba(0,0,0,0.3);
     --gradient: none;
-  }}
+  }
 
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  * { margin: 0; padding: 0; box-sizing: border-box; }
 
-  body {{
+  body {
     font-family: 'DM Sans', sans-serif;
     overflow: hidden;
     height: 100vh;
@@ -39,48 +67,53 @@ def build_widget_html(deck: dict) -> str:
     color: var(--text);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-  }}
+  }
 
-  #app {{
+  #app {
     position: relative;
     width: 100%;
     height: 100%;
     overflow: hidden;
-  }}
+  }
 
-  /* ─── Theme Switcher ─── */
-  .theme-switcher {{
+  .loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    font-size: 18px;
+    color: var(--text-secondary);
+  }
+
+  .theme-switcher {
     position: absolute;
     top: 16px;
     left: 16px;
     display: flex;
     gap: 8px;
     z-index: 100;
-  }}
-  .theme-dot {{
+  }
+  .theme-dot {
     width: 18px;
     height: 18px;
     border-radius: 50%;
     border: 2px solid rgba(255,255,255,0.3);
     cursor: pointer;
     transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-  }}
-  .theme-dot:hover {{
-    transform: scale(1.2);
-  }}
-  .theme-dot.active {{
+  }
+  .theme-dot:hover { transform: scale(1.2); }
+  .theme-dot.active {
     border-color: #fff;
     box-shadow: 0 0 8px rgba(255,255,255,0.4);
     transform: scale(1.15);
-  }}
-  .theme-dot[data-theme="midnight"] {{ background: #0f172a; }}
-  .theme-dot[data-theme="clean"] {{ background: #ffffff; border-color: rgba(0,0,0,0.2); }}
-  .theme-dot[data-theme="sunset"] {{ background: linear-gradient(135deg, #f97316, #ec4899); }}
-  .theme-dot[data-theme="forest"] {{ background: #064e3b; }}
-  .theme-dot[data-theme="electric"] {{ background: #0a0a0a; border-color: #00ff88; }}
+  }
+  .theme-dot[data-theme="midnight"] { background: #0f172a; }
+  .theme-dot[data-theme="clean"] { background: #ffffff; border-color: rgba(0,0,0,0.2); }
+  .theme-dot[data-theme="sunset"] { background: linear-gradient(135deg, #f97316, #ec4899); }
+  .theme-dot[data-theme="forest"] { background: #064e3b; }
+  .theme-dot[data-theme="electric"] { background: #0a0a0a; border-color: #00ff88; }
 
-  /* ─── Slide Counter ─── */
-  .slide-counter {{
+  .slide-counter {
     position: absolute;
     top: 18px;
     right: 20px;
@@ -90,20 +123,17 @@ def build_widget_html(deck: dict) -> str:
     color: var(--text-secondary);
     z-index: 100;
     letter-spacing: 0.5px;
-  }}
+  }
 
-  /* ─── Slides Container ─── */
-  .slides-viewport {{
+  .slides-viewport {
     position: relative;
     width: 100%;
     height: 100%;
-  }}
-  .slide {{
+  }
+  .slide {
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -112,29 +142,28 @@ def build_widget_html(deck: dict) -> str:
     transform: translateX(60px);
     transition: opacity 0.4s ease, transform 0.4s ease;
     pointer-events: none;
-  }}
-  .slide.active {{
+  }
+  .slide.active {
     opacity: 1;
     transform: translateX(0);
     pointer-events: auto;
-  }}
-  .slide.exit-left {{
+  }
+  .slide.exit-left {
     opacity: 0;
     transform: translateX(-60px);
-  }}
+  }
 
-  /* ─── Title Slide ─── */
-  .slide-title {{
+  .slide-title {
     text-align: center;
     justify-content: center;
     align-items: center;
-  }}
-  .slide-title .slide-icon {{
+  }
+  .slide-title .slide-icon {
     font-size: 64px;
     margin-bottom: 20px;
     display: block;
-  }}
-  .slide-title h1 {{
+  }
+  .slide-title h1 {
     font-family: 'Montserrat', sans-serif;
     font-weight: 900;
     font-size: clamp(36px, 6vw, 64px);
@@ -145,22 +174,21 @@ def build_widget_html(deck: dict) -> str:
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-  }}
-  .slide-title .subtitle {{
+  }
+  .slide-title .subtitle {
     font-size: clamp(16px, 2.2vw, 22px);
     color: var(--text-secondary);
     font-weight: 400;
     max-width: 600px;
     line-height: 1.6;
-  }}
+  }
 
-  /* ─── Content Slides ─── */
-  .slide-content .slide-icon {{
+  .slide-content .slide-icon {
     font-size: 40px;
     margin-bottom: 12px;
     display: block;
-  }}
-  .slide-content h2 {{
+  }
+  .slide-content h2 {
     font-family: 'Montserrat', sans-serif;
     font-weight: 800;
     font-size: clamp(28px, 4vw, 44px);
@@ -168,49 +196,45 @@ def build_widget_html(deck: dict) -> str:
     line-height: 1.15;
     margin-bottom: 20px;
     color: var(--text);
-  }}
-  .slide-content .body-text {{
+  }
+  .slide-content .body-text {
     font-size: clamp(15px, 1.8vw, 18px);
     color: var(--text-secondary);
     line-height: 1.7;
     max-width: 700px;
     margin-bottom: 28px;
-  }}
+  }
 
-  /* ─── Bullet List ─── */
-  .bullet-list {{
+  .bullet-list {
     list-style: none;
     padding: 0;
     max-width: 650px;
-  }}
-  .bullet-list li {{
+  }
+  .bullet-list li {
     position: relative;
     padding-left: 28px;
     margin-bottom: 14px;
     font-size: clamp(14px, 1.6vw, 17px);
     color: var(--text-secondary);
     line-height: 1.6;
-  }}
-  .bullet-list li::before {{
+  }
+  .bullet-list li::before {
     content: '';
     position: absolute;
-    left: 0;
-    top: 9px;
-    width: 8px;
-    height: 8px;
+    left: 0; top: 9px;
+    width: 8px; height: 8px;
     border-radius: 50%;
     background: var(--accent);
     box-shadow: 0 0 8px var(--accent-glow);
-  }}
+  }
 
-  /* ─── Metric Cards ─── */
-  .metrics-row {{
+  .metrics-row {
     display: flex;
     gap: 20px;
     flex-wrap: wrap;
     margin-top: 8px;
-  }}
-  .metric-card {{
+  }
+  .metric-card {
     flex: 1;
     min-width: 140px;
     max-width: 220px;
@@ -220,39 +244,37 @@ def build_widget_html(deck: dict) -> str:
     padding: 24px 20px;
     text-align: center;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
-  }}
-  .metric-card:hover {{
+  }
+  .metric-card:hover {
     transform: translateY(-2px);
     box-shadow: var(--shadow);
-  }}
-  .metric-card .metric-value {{
+  }
+  .metric-card .metric-value {
     font-family: 'Montserrat', sans-serif;
     font-weight: 800;
     font-size: clamp(24px, 3vw, 36px);
     color: var(--accent);
     letter-spacing: -0.5px;
     margin-bottom: 6px;
-  }}
-  .metric-card .metric-label {{
+  }
+  .metric-card .metric-label {
     font-weight: 600;
     font-size: 14px;
     color: var(--text);
     margin-bottom: 4px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-  }}
-  .metric-card .metric-desc {{
+  }
+  .metric-card .metric-desc {
     font-size: 12px;
     color: var(--text-secondary);
-  }}
+  }
 
-  /* ─── Navigation Arrows ─── */
-  .nav-arrow {{
+  .nav-arrow {
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
-    width: 44px;
-    height: 44px;
+    width: 44px; height: 44px;
     border-radius: 50%;
     border: none;
     background: var(--nav-bg);
@@ -265,24 +287,20 @@ def build_widget_html(deck: dict) -> str:
     justify-content: center;
     transition: background 0.2s ease, transform 0.2s ease;
     backdrop-filter: blur(8px);
-  }}
-  .nav-arrow:hover {{
+  }
+  .nav-arrow:hover {
     background: var(--nav-hover);
     transform: translateY(-50%) scale(1.08);
-  }}
-  .nav-arrow.prev {{ left: 16px; }}
-  .nav-arrow.next {{ right: 16px; }}
-  .nav-arrow:disabled {{
-    opacity: 0.3;
-    cursor: default;
-  }}
-  .nav-arrow:disabled:hover {{
+  }
+  .nav-arrow.prev { left: 16px; }
+  .nav-arrow.next { right: 16px; }
+  .nav-arrow:disabled { opacity: 0.3; cursor: default; }
+  .nav-arrow:disabled:hover {
     transform: translateY(-50%);
     background: var(--nav-bg);
-  }}
+  }
 
-  /* ─── Dot Indicators ─── */
-  .dots {{
+  .dots {
     position: absolute;
     bottom: 20px;
     left: 50%;
@@ -290,51 +308,36 @@ def build_widget_html(deck: dict) -> str:
     display: flex;
     gap: 8px;
     z-index: 100;
-  }}
-  .dot {{
-    width: 8px;
-    height: 8px;
+  }
+  .dot {
+    width: 8px; height: 8px;
     border-radius: 50%;
     background: var(--dot-inactive);
     cursor: pointer;
     transition: background 0.3s ease, transform 0.3s ease, width 0.3s ease;
-  }}
-  .dot.active {{
+  }
+  .dot.active {
     background: var(--accent);
     width: 24px;
     border-radius: 4px;
     box-shadow: 0 0 10px var(--accent-glow);
-  }}
+  }
 
-  /* ─── Responsive ─── */
-  @media (max-width: 640px) {{
-    .slide {{
-      padding: 50px 28px;
-    }}
-    .metrics-row {{
-      gap: 12px;
-    }}
-    .metric-card {{
-      min-width: 100px;
-      padding: 16px 12px;
-    }}
-    .nav-arrow {{
-      width: 36px;
-      height: 36px;
-      font-size: 14px;
-    }}
-    .nav-arrow.prev {{ left: 8px; }}
-    .nav-arrow.next {{ right: 8px; }}
-  }}
-</style>
-</head>
-<body>
-<div id="app"></div>
-<script>
-const DECK = {deck_json};
+  @media (max-width: 640px) {
+    .slide { padding: 50px 28px; }
+    .metrics-row { gap: 12px; }
+    .metric-card { min-width: 100px; padding: 16px 12px; }
+    .nav-arrow { width: 36px; height: 36px; font-size: 14px; }
+    .nav-arrow.prev { left: 8px; }
+    .nav-arrow.next { right: 8px; }
+  }
+"""
 
-const THEMES = {{
-  midnight: {{
+# ─── Static JS (no interpolation needed; DECK is injected before this) ────
+
+_JS = """
+const THEMES = {
+  midnight: {
     bg: '#0f172a',
     bgSecondary: 'rgba(255,255,255,0.05)',
     text: '#ffffff',
@@ -347,8 +350,8 @@ const THEMES = {{
     navHover: 'rgba(255,255,255,0.15)',
     dotInactive: 'rgba(255,255,255,0.25)',
     gradient: 'none',
-  }},
-  clean: {{
+  },
+  clean: {
     bg: '#ffffff',
     bgSecondary: 'rgba(0,0,0,0.03)',
     text: '#1e293b',
@@ -361,8 +364,8 @@ const THEMES = {{
     navHover: 'rgba(0,0,0,0.1)',
     dotInactive: 'rgba(0,0,0,0.15)',
     gradient: 'none',
-  }},
-  sunset: {{
+  },
+  sunset: {
     bg: '#1a0a2e',
     bgSecondary: 'rgba(255,255,255,0.06)',
     text: '#ffffff',
@@ -375,8 +378,8 @@ const THEMES = {{
     navHover: 'rgba(255,255,255,0.18)',
     dotInactive: 'rgba(255,255,255,0.25)',
     gradient: 'linear-gradient(135deg, #f97316 0%, #ec4899 50%, #8b5cf6 100%)',
-  }},
-  forest: {{
+  },
+  forest: {
     bg: '#064e3b',
     bgSecondary: 'rgba(255,255,255,0.06)',
     text: '#ecfdf5',
@@ -389,8 +392,8 @@ const THEMES = {{
     navHover: 'rgba(255,255,255,0.15)',
     dotInactive: 'rgba(255,255,255,0.25)',
     gradient: 'none',
-  }},
-  electric: {{
+  },
+  electric: {
     bg: '#0a0a0a',
     bgSecondary: 'rgba(255,255,255,0.04)',
     text: '#e0e0e0',
@@ -403,13 +406,36 @@ const THEMES = {{
     navHover: 'rgba(0,255,136,0.12)',
     dotInactive: 'rgba(255,255,255,0.2)',
     gradient: 'none',
-  }},
-}};
+  },
+};
 
 let currentSlide = 0;
-let currentTheme = DECK.theme || 'midnight';
+let currentTheme = 'midnight';
 
-function applyTheme(name) {{
+// If DECK was baked in, render immediately
+if (DECK) {
+  currentTheme = DECK.theme || 'midnight';
+  applyTheme(currentTheme);
+  render();
+}
+
+// Also listen for postMessage so ChatGPT iframe bridge can push data
+window.addEventListener("message", (event) => {
+  if (event.source !== window.parent) return;
+  const msg = event.data;
+  if (!msg || msg.jsonrpc !== "2.0") return;
+  if (msg.method !== "ui/notifications/tool-result") return;
+  const newDeck = msg.params?._meta?.deck;
+  if (newDeck) {
+    DECK = newDeck;
+    currentSlide = 0;
+    currentTheme = DECK.theme || 'midnight';
+    applyTheme(currentTheme);
+    render();
+  }
+});
+
+function applyTheme(name) {
   const t = THEMES[name];
   if (!t) return;
   currentTheme = name;
@@ -428,64 +454,63 @@ function applyTheme(name) {{
   r.setProperty('--gradient', t.gradient);
   document.body.style.background = t.gradient !== 'none' ? t.gradient : t.bg;
 
-  // Update active theme dot
-  document.querySelectorAll('.theme-dot').forEach(d => {{
+  document.querySelectorAll('.theme-dot').forEach(d => {
     d.classList.toggle('active', d.dataset.theme === name);
-    // For clean theme, adjust border colors
-    if (name === 'clean') {{
+    if (name === 'clean') {
       d.style.borderColor = d.dataset.theme === name ? '#1e293b' : 'rgba(0,0,0,0.2)';
-    }} else {{
+    } else {
       d.style.borderColor = d.dataset.theme === name ? '#fff' : 'rgba(255,255,255,0.3)';
       if (d.dataset.theme === 'clean') d.style.borderColor = 'rgba(255,255,255,0.5)';
-    }}
-  }});
-}}
+    }
+  });
+}
 
-function renderSlideHTML(slide, index) {{
+function renderSlideHTML(slide, index) {
   const icon = slide.icon || '';
   const isTitle = slide.type === 'title';
   const hasMetrics = ['market', 'business_model', 'traction', 'ask'].includes(slide.type);
   const hasBullets = ['problem', 'solution', 'product', 'team', 'custom'].includes(slide.type);
 
-  if (isTitle) {{
+  if (isTitle) {
     return `
-      <div class="slide slide-title ${{index === currentSlide ? 'active' : ''}}" data-index="${{index}}">
-        <span class="slide-icon">${{icon}}</span>
-        <h1>${{slide.title}}</h1>
-        <p class="subtitle">${{slide.subtitle || ''}}</p>
+      <div class="slide slide-title ${index === currentSlide ? 'active' : ''}" data-index="${index}">
+        <span class="slide-icon">${icon}</span>
+        <h1>${slide.title}</h1>
+        <p class="subtitle">${slide.subtitle || ''}</p>
       </div>`;
-  }}
+  }
 
   let bulletsHTML = '';
-  if ((hasBullets || slide.bullets) && slide.bullets) {{
-    bulletsHTML = `<ul class="bullet-list">${{
-      slide.bullets.map(b => `<li>${{b}}</li>`).join('')
-    }}</ul>`;
-  }}
+  if ((hasBullets || slide.bullets) && slide.bullets) {
+    bulletsHTML = `<ul class="bullet-list">${
+      slide.bullets.map(b => `<li>${b}</li>`).join('')
+    }</ul>`;
+  }
 
   let metricsHTML = '';
-  if ((hasMetrics || slide.metrics) && slide.metrics) {{
-    metricsHTML = `<div class="metrics-row">${{
+  if ((hasMetrics || slide.metrics) && slide.metrics) {
+    metricsHTML = `<div class="metrics-row">${
       slide.metrics.map(m => `
         <div class="metric-card">
-          <div class="metric-value">${{m.value}}</div>
-          <div class="metric-label">${{m.label}}</div>
-          <div class="metric-desc">${{m.description || ''}}</div>
+          <div class="metric-value">${m.value}</div>
+          <div class="metric-label">${m.label}</div>
+          <div class="metric-desc">${m.description || ''}</div>
         </div>`).join('')
-    }}</div>`;
-  }}
+    }</div>`;
+  }
 
   return `
-    <div class="slide slide-content ${{index === currentSlide ? 'active' : ''}}" data-index="${{index}}">
-      <span class="slide-icon">${{icon}}</span>
-      <h2>${{slide.title}}</h2>
-      <p class="body-text">${{slide.content || ''}}</p>
-      ${{bulletsHTML}}
-      ${{metricsHTML}}
+    <div class="slide slide-content ${index === currentSlide ? 'active' : ''}" data-index="${index}">
+      <span class="slide-icon">${icon}</span>
+      <h2>${slide.title}</h2>
+      <p class="body-text">${slide.content || ''}</p>
+      ${bulletsHTML}
+      ${metricsHTML}
     </div>`;
-}}
+}
 
-function goToSlide(index) {{
+function goToSlide(index) {
+  if (!DECK) return;
   const slides = document.querySelectorAll('.slide');
   const total = DECK.slides.length;
   if (index < 0 || index >= total) return;
@@ -493,91 +518,76 @@ function goToSlide(index) {{
   const prev = currentSlide;
   currentSlide = index;
 
-  slides.forEach((el, i) => {{
+  slides.forEach((el, i) => {
     el.classList.remove('active', 'exit-left');
-    if (i === currentSlide) {{
+    if (i === currentSlide) {
       el.classList.add('active');
-    }} else if (i === prev && prev < currentSlide) {{
+    } else if (i === prev && prev < currentSlide) {
       el.classList.add('exit-left');
-    }}
-  }});
+    }
+  });
 
-  // Update counter
   const counter = document.querySelector('.slide-counter');
-  if (counter) counter.textContent = `${{currentSlide + 1}} / ${{total}}`;
+  if (counter) counter.textContent = `${currentSlide + 1} / ${total}`;
 
-  // Update dots
-  document.querySelectorAll('.dot').forEach((d, i) => {{
+  document.querySelectorAll('.dot').forEach((d, i) => {
     d.classList.toggle('active', i === currentSlide);
-  }});
+  });
 
-  // Update arrow states
   const prevBtn = document.querySelector('.nav-arrow.prev');
   const nextBtn = document.querySelector('.nav-arrow.next');
   if (prevBtn) prevBtn.disabled = currentSlide === 0;
   if (nextBtn) nextBtn.disabled = currentSlide === total - 1;
-}}
+}
 
-function render() {{
+function render() {
+  if (!DECK) return;
   const app = document.getElementById('app');
   const total = DECK.slides.length;
 
-  // Theme switcher
   const themeSwitcher = `<div class="theme-switcher">
-    ${{Object.keys(THEMES).map(name =>
-      `<div class="theme-dot ${{name === currentTheme ? 'active' : ''}}" data-theme="${{name}}" title="${{name}}"></div>`
-    ).join('')}}
+    ${Object.keys(THEMES).map(name =>
+      `<div class="theme-dot ${name === currentTheme ? 'active' : ''}" data-theme="${name}" title="${name}"></div>`
+    ).join('')}
   </div>`;
 
-  // Slide counter
-  const counter = `<div class="slide-counter">${{currentSlide + 1}} / ${{total}}</div>`;
+  const counter = `<div class="slide-counter">${currentSlide + 1} / ${total}</div>`;
 
-  // Navigation arrows
   const arrows = `
-    <button class="nav-arrow prev" ${{currentSlide === 0 ? 'disabled' : ''}} aria-label="Previous slide">&#8249;</button>
-    <button class="nav-arrow next" ${{currentSlide === total - 1 ? 'disabled' : ''}} aria-label="Next slide">&#8250;</button>`;
+    <button class="nav-arrow prev" ${currentSlide === 0 ? 'disabled' : ''} aria-label="Previous slide">&#8249;</button>
+    <button class="nav-arrow next" ${currentSlide === total - 1 ? 'disabled' : ''} aria-label="Next slide">&#8250;</button>`;
 
-  // Dots
   const dots = `<div class="dots">
-    ${{DECK.slides.map((_, i) =>
-      `<div class="dot ${{i === currentSlide ? 'active' : ''}}" data-index="${{i}}"></div>`
-    ).join('')}}
+    ${DECK.slides.map((_, i) =>
+      `<div class="dot ${i === currentSlide ? 'active' : ''}" data-index="${i}"></div>`
+    ).join('')}
   </div>`;
 
-  // Slides
   const slidesHTML = `<div class="slides-viewport">
-    ${{DECK.slides.map((s, i) => renderSlideHTML(s, i)).join('')}}
+    ${DECK.slides.map((s, i) => renderSlideHTML(s, i)).join('')}
   </div>`;
 
   app.innerHTML = themeSwitcher + counter + arrows + slidesHTML + dots;
 
-  // Event listeners
   document.querySelector('.nav-arrow.prev').addEventListener('click', () => goToSlide(currentSlide - 1));
   document.querySelector('.nav-arrow.next').addEventListener('click', () => goToSlide(currentSlide + 1));
 
-  document.querySelectorAll('.dot').forEach(d => {{
+  document.querySelectorAll('.dot').forEach(d => {
     d.addEventListener('click', () => goToSlide(parseInt(d.dataset.index)));
-  }});
+  });
 
-  document.querySelectorAll('.theme-dot').forEach(d => {{
+  document.querySelectorAll('.theme-dot').forEach(d => {
     d.addEventListener('click', () => applyTheme(d.dataset.theme));
-  }});
-}}
+  });
+}
 
-// Initialize
-applyTheme(currentTheme);
-render();
-
-// Keyboard navigation
-document.addEventListener('keydown', (e) => {{
-  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {{
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
     e.preventDefault();
     goToSlide(currentSlide + 1);
-  }} else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {{
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
     e.preventDefault();
     goToSlide(currentSlide - 1);
-  }}
-}});
-</script>
-</body>
-</html>"""
+  }
+});
+"""
